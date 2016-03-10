@@ -1,0 +1,15 @@
+## Version 0.2 ##
+  * Added encoding validation functionality
+  * Added automatic UTF encoding detection
+  * Added transcoding functionality
+  * Added prettyauto example
+
+## Version 0.11 (16 Nov 2012) ##
+  * Fixed compilation issues for various compilers
+  * Fixed some memory alignment issues
+  * Eliminate warnings at maximum level
+  * Other Bug fixes
+  * Added demonstration of iteration APIs in tutorial
+
+## Version 0.1 (18 Nov 2011) ##
+  * Initial release.

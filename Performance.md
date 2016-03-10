@@ -1,0 +1,130 @@
+
+
+# Introduction #
+
+One major focus of rapidjson is runtime performance. The source code includes a simple performance test at `rapidjson/src/test/perftest`.
+
+JSON parsers compared:
+  * rapidjson 0.1
+  * [YAJL](http://lloyd.github.com/yajl/) 2.01
+  * [JsonCpp](http://jsoncpp.sourceforge.net/) 0.5.0
+
+# Methodology #
+
+The main test data is a 672KB synthetic UTF-8 JSON file, obtained from [json-test-suite](http://code.google.com/p/json-test-suite/downloads/detail?name=sample.zip).
+
+Testing platform:
+  * Intel Core i7 CPU 920 2.67Ghz
+  * Windows 7 64-bit
+  * Visual Studio 2010 (VC)
+  * Intel C++ Compiler 11.1 (ICC)
+  * GCC 4.5.3 in Cygwin 1.7.9 (GCC)
+
+# Results #
+
+Following results are compiled from rapidjson/test/perftest.
+
+All timing are in measured by running a test 1000 trials. The results below is the total duration of 1000 trials in milliseconds.
+
+## VC 32-bit ##
+
+|                                  | rapidjson | YAJL  | JsonCpp |
+|:---------------------------------|:----------|:------|:--------|
+| strlen()                         | 495       |       |         |
+| SAX Parsing                      | **644**     | 3594  | -       |
+| DOM Parsing (in-situ)            | **730**     | -     | -       |
+| DOM Parsing                      | **944**     | 6149  | 6862    |
+| Stringify of DOM                 | **1289**    | 2355  | 5449    |
+| Stringify of DOM with formatting | **1754**    | 18289 | 10443   |
+
+## ICC 32-bit ##
+
+|                                  | rapidjson | YAJL  | JsonCpp |
+|:---------------------------------|:----------|:------|:--------|
+| strlen()                         | 45        |       |         |
+| SAX Parsing                      | **672**     | 3057  | -       |
+| DOM Parsing (in-situ)            | **787**     | -     | -       |
+| DOM Parsing                      | **1055**    | 4853  | 5803    |
+| Stringify of DOM                 | **1203**    | 1937  | 5365    |
+| Stringify of DOM with formatting | **1548**    | 13996 | 9911    |
+
+## GCC 32-bit ##
+
+|                                  | rapidjson | YAJL  | JsonCpp |
+|:---------------------------------|:----------|:------|:--------|
+| strlen()                         | 189       |       |         |
+| SAX Parsing                      | **647**     | 3101  | -       |
+| DOM Parsing (in-situ)            | **702**     | -     | -       |
+| DOM Parsing                      | **796**     | 6316  | 6705    |
+| Stringify of DOM                 | **1289**    | 14040 | 24757   |
+| Stringify of DOM with formatting | **1754**    | 34279 | 29482   |
+
+# Why rapidjson is fast? #
+
+rapidjson has made use of several techniques to achieve high performance.
+
+## C++ ##
+
+rapidjson uses template instead of pointer to function or virtual function to get JSON text from stream, and send JSON events.
+
+Parse options is also implemented as template parameter. Even if more options are added in future, it will not incur performance degradation for unused options.
+
+In the DOM-style API, the `Value` class is for storing a JSON value as variant. To prevent the overhead of allocating and copying (e.g. copying an array), and the complexity of reference management (e.g. reference counting), rapidjson just make `Value` as non-copyable. However, the value can be assigned with other value using move semantics, i.e.
+
+```
+Value a(kArrayType);
+a.PushBack(10);
+a.PushBack(20);
+
+Value b; // default constructor makes a null JSON value.
+b = a;
+assert(b.IsArray());
+assert(b[0u] == 10);
+assert(b[1u] == 20);
+assert(a.IsNull());  // a becomes a null JSON value after the assignment.
+```
+
+
+## In-situ vs non-destructive ##
+
+In-situ parsing means decoding JSON strings (which contains escapes such as "\n", "\uXXXX", etc.) directly to the source buffer. Compared to traditional "non-destructive" parsing, in-situ parsing prevent allocation of decoded strings and copying.
+
+## Memory allocation ##
+
+rapidjson comes with a default allocator, which allocates memory but not release the memory, until the allocator is itself destructed. This make allocation fast, also it allocated block do not need an additional header.
+
+Besides, during parsing, rapidjson makes use of a stack data structure (`rapidjson::internal::Stack`)to firstly store the temporarily parsed values, instead of push-back values to its parent values directly (obejct or array). By doing this, parser can determine the number of elements in object/array, preventing reallocating memory such as using `std::vector::push_back()`.
+
+## SSE2/SSE4.2 acceleration ##
+
+The following table shows the effects of SSE2/SSE4.2 acceleration. The first test is parsing a UTF8 JSON text prefixed with one million whitespaces. The second test parses the 672KB test data.
+
+VC 32-bit:
+| | strlen() | strspn() | rapidjson (no SIMD) | rapidjson (SSE2) | rapidjson (SSE4.2) |
+|:|:---------|:---------|:--------------------|:-----------------|:-------------------|
+| Skip 1M whitespace | 752      | 3011     | 1349                | 170              | **102**            |
+| SAX Parsing (672KB) | 512      | -        | 984                 | 737              | **644**            |
+
+This optimization is particularly useful for large JSON data with indentation.
+
+## Number parsing and Pow10() ##
+
+Some JSON parsers convert JSON numbers to double. This not only reduce performance for parsing and converting the value back to integer, it also be problematic if the user need to parse 64-bit integers, which cannot be represented by double.
+
+rapidjson uses the magnitude of JSON numbers to choose a suitable numeric data type, and triggers the appropriate event accordingly. So it is fast and also providing full 64-bit integer precision.
+
+For parsing real numbers, rapidjson uses a custom `double Pow10(int)` function to calculate the effect of exponent. This function uses look-up table. It is much faster than using standard library function `double pow(10.0, int)`. Here shows a comparison for one million calls in milliseconds.
+
+32-bit:
+|     | rapidjson Pow10() | pow() |
+|:----|:------------------|:------|
+| VC  | **3**               | 36    |
+| ICC | **3**               | 37    |
+| GCC | **3**               | 197   |
+
+# Further optimization #
+
+Currently in rapidjson 0.1, stringifying JSON is not as fast as parsing. The reason for this is due to using `sprintf()` for converting double to string. This can be further optimized.
+
+# Limitations #
+Benchmarks can only test a particular dataset on particular testing environment. And the current test dataset is a synthetic one instead of real data. If you know any good dataset for testing JSON performance, please inform.

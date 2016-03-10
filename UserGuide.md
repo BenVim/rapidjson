@@ -1,0 +1,440 @@
+**Table of Contents**
+
+
+# 1. Introduction #
+**rapidjson** is a C++ [JSON](http://www.json.org/) parser and generator. In other words, it helps a C++ program to read JSON data and write JSON data.
+
+**rapidjson** fully conforms [RFC4627](http://www.ietf.org/rfc/rfc4627.txt).
+
+**rapidjson** supports SAX (Simple API for XML) style and DOM (Document Object Model) for parsing.
+
+## 1.1. Requirements ##
+**rapidjson** is written in C++ with very few dependencies (no BOOST, no STL).
+
+It is designed to be run on 32-bit and 64-bit platforms.
+
+During development, **rapidjson** is mainly tested with these compilers
+  * Visual C++ 2008, 2010
+  * Intel C++ Composer XE 2011
+  * GNU Compiler Collection (gcc) 3 and 4
+
+and these platforms
+  * Microsoft Windows
+  * OS X
+  * Linux
+
+But other compilers/platforms may work as well. Please report to us on other compilers/platforms that can successfully adopted **rapidjson**.
+
+**rapidjson** contains code with [SSE2](http://en.wikipedia.org/wiki/SSE2) and [SSE4.2](http://en.wikipedia.org/wiki/SSE4#SSE4.2) optimization. But this is optional.
+
+## 1.2. Installation ##
+Download the [released packages](http://code.google.com/p/rapidjson/downloads/list) or getting the latest source from [SVN repository](http://code.google.com/p/rapidjson/source/browse/).
+
+**rapidjson** is a header-only library. That means, the only thing to be done is to copy `rapidjson/include/rapidjson` and its sub-directories to your project or other include paths.
+
+## 1.3. Tests and examples ##
+**rapidjson** include unit tests, performance tests and examples.
+
+If you obtained the release packages, there are build folders (`vs2008`, `vs2010`, `gmake`) in `/rapidjson/build/' already.
+
+Otherwise, please obtain [premake4](http://industriousone.com/premake/download), and then run `rapidjson/build/permake.bat` on Windows, or `rapidjson/build/premake`. These will generates the build folders.
+
+By using Visual C++, build test.sln and/or example.sln in `vs2008` or `vs2010`.
+
+By using GNU make, run GNU make in `build/gmake`, for example
+
+```
+$make -f test.make config=release32
+$make -f example.make config=debug32
+```
+
+On success, the executable are generated at rapidjson/bin
+
+# 2. Hello World #
+
+The following code is the simplest way of using **rapidjson**.
+
+```
+#include "rapidjson/document.h"
+#include <cstdio>
+
+int main() {
+    const char json[] = "{ \"hello\" : \"world\" }";
+
+    rapidjson::Document d;
+    d.Parse<0>(json);
+
+    printf("%s\n", d["hello"].GetString());
+
+    return 0;
+}
+```
+
+This program outputs
+
+```
+world
+```
+
+This example parse a JSON text string into a DOM tree. Then it obtains the `"hello"` member of the root JSON object. Finally it obtains the string of that value, which is `"world"`.
+
+Some notes:
+  * All types of **rapidjson** reside in namespace `rapidjson`
+  * The number `0` in `Parse<0>` means using default parse flags. More flags will be explained.
+  * The JSON string and the strings stored in DOM are assumed to be UTF-8. Encodings and character types will be discussed later.
+
+# 3. Value #
+The DOM style API of **rapidjson** is provided by `Value` and `Document`.
+
+`Value` can be thought of a variant type, representing a JSON value which can stores either a null value, false, true, number, string, array or object. For being an array or object, a `Value` composes of a list of elements or members (key-value pairs).
+
+`Document` is derived from `Value`. It represents the root of a DOM. It introduces a few more APIs for parsing.
+
+![http://yuml.me/diagram/plain;/class/%5BValue%5D%5E-%5BDocument%5D,%20%5BValue%5D++-*%5BValue%5D.png](http://yuml.me/diagram/plain;/class/%5BValue%5D%5E-%5BDocument%5D,%20%5BValue%5D++-*%5BValue%5D.png)
+
+However, `Value` and `Document` are actually `typedef`s of `GenericValue` and `GenericDocument` class templates respectively, with UTF-8 encoding and default allocator as template parameters. We will come back to the details of these template parameters later.
+
+`Value` provides the major APIs for querying, creating, modifying, the DOM tree.
+
+## 3.1. Querying Value ##
+Here, we will use some modified code from `rapidjson/example/tutorial` to show the usage of `Value`.
+
+Assumes we have a JSON text stored in a C string `const char* json`:
+```
+{
+    "hello": "world",
+    "t": true ,
+    "f": false,
+    "n": null,
+    "i": 123,
+    "pi": 3.1416,
+    "a": [
+        1,
+        2,
+        3,
+        4
+    ]
+}
+```
+
+After we parse it into a document by
+
+```
+rapidjson::Document document;
+document.Parse<0>(json);
+```
+
+We will get the `document` object which is root value of the DOM tree.
+
+The root value of a conforming JSON should be either an object or an array. In this case, it is an object with 7 members.
+
+The following code shows some of the API usage of `Value`:
+
+```
+assert(document.IsObject());
+
+assert(document.HasMember("hello"));
+assert(document["hello"].IsString());
+printf("hello = %s\n", document["hello"].GetString());
+
+assert(document["t"].IsBool());		// JSON true/false are bool. Can also uses more specific function IsTrue().
+printf("t = %s\n", document["t"].GetBool() ? "true" : "false");
+
+assert(document["f"].IsBool());
+printf("f = %s\n", document["f"].GetBool() ? "true" : "false");
+
+printf("n = %s\n", document["n"].IsNull() ? "null" : "?");
+
+assert(document["i"].IsNumber());	// Number is a JSON type, but C++ needs more specific type.
+assert(document["i"].IsInt());		// In this case, IsUint()/IsInt64()/IsUInt64() also return true.
+printf("i = %d\n", document["i"].GetInt());	// Alternative (int)document["i"]
+
+assert(document["pi"].IsNumber());
+assert(document["pi"].IsDouble());
+printf("pi = %g\n", document["pi"].GetDouble());
+
+const Value& a = document["a"];	// Using a reference for consecutive access is handy and faster.
+assert(a.IsArray());
+for (SizeType i = 0; i < a.Size(); i++)	// rapidjson uses SizeType instead of size_t.
+	printf("a[%d] = %d\n", i, a[i].GetInt());
+```
+
+Since `Value` is a variant type, some APIs are only valid according to the contents. For example, `v.HasMember()` should only be called when `v` is an object. But due to performance consideration, **rapidjson** only checks these validity issues with `RAPIDJSON_ASSERT` macro (a custom definable assertion, by default is `assert()`). User may need to check the type of value, when the JSON may not follow the expected schema. This can be done with `IsObject()`, `IsBool()`, etc.
+
+### Querying Array ###
+In the above example, we use `operator[SizeType]` to obtain an element using index. `SizeType` is by default `typedef` as `unsigned` (for both 32-bit and 64-bit architecture, so it is limited to store up to 2^32-1 values in an array even in a 64-bit environment, but this is customizable).
+
+You may access an array with literal indices such as  `a[1]`, `a[2]`. However, it will generates a **compilation error** when accessing the first element with **`a[0]`**. For example, Visual C++ will show this:
+
+```
+error C2593: 'operator [' is ambiguous
+```
+
+It is because 0 (the literal zero) in C++ can mean an numeric type (int, unsigned, etc.) or a null pointer of any type. The compiler cannot decide whether `a[0]` should call `operator[SizeType]` or `operator[const Ch*]`(for object member access). There are two workaround:
+
+  * `a[SizeType(0)]`
+  * `a[0u]`
+
+Besides using `Size()` and `operator[]` to obtain the elements in an array value, we can also use iterator, similar to `std::vector`:
+
+```
+for (Value::ConstValueIterator itr = a.Begin(); itr != a.End(); ++itr)
+    printf("%d ", itr->GetInt());
+```
+
+Finally, there are some query functions for array, which are similar to `std::vector`
+  * `SizeType Capacity() const`
+  * `bool Empty() const`
+
+### Quering Object ###
+Similarly, we can iterate object members by iterator:
+
+```
+static const char* kTypeNames[] = { "Null", "False", "True", "Object", "Array", "String", "Number" };
+for (Value::ConstMemberIterator itr = document.MemberBegin(); itr != document.MemberEnd(); ++itr)
+    printf("Type of member %s is %s\n", itr->name.GetString(), kTypeNames[itr->value.GetType()]);
+```
+
+which outputs:
+```
+Type of member hello is String
+Type of member t is True
+Type of member f is False
+Type of member n is Null
+Type of member i is Number
+Type of member pi is Number
+Type of member a is Array
+```
+
+In **rapidjson** version 0.1x, when `operator[const Ch*]` cannot find the member, it returns a reference to a null value singleton. This was a problematic design because the singleton can then be modified.
+
+Therefore, since **rapidjson** version 0.2, the behavior is changed. It generates an assertion fail when the member is not found.
+
+Another related issue is that, if we are unsure whether a member is exist, we need firstly call `HasMember()` and then call`operator[const Ch*]` to obtain the value. This incurs two lookup overheads. So, since **rapidjson** version 0.2, it publicizes the `FindMember()` function, which can check the existence of member and obtain its value at once:
+
+```
+Value::Member* m = document.FindMember("hello");
+if (m)
+    printf("%s\n", m->value.GetString());
+```
+
+### Querying Number ###
+JSON provide a single numerical type called Number. Number can be integer or real numbers. RFC 4627 says the range of Number is specified by parser.
+
+As C++ provides several integer and floating point number types, **rapidjson** try to handle this with best possible range and performance.
+
+Therefore, when **rapidjson** parse a number value, it stores it as either one of the following type
+  * `unsigned` (32-bit unsigned integer)
+  * `int` (32-bit signed integer)
+  * `uint64_t` (64-bit unsigned integer)
+  * `int64_t` (64-bit signed integer)
+  * `double` (64-bit double precision floating point)
+
+When querying a number, you can check whether the number can be obtained as target type:
+
+  * `IsNumber()` whether the value is a number
+  * `IsInt()` whether the number is a `int`
+  * `IsUint()` whether the number is a `uint`
+  * `IsInt64()` whether the number is a `int64_t`
+  * `IsUint64()` whether the number is a `uint64_t`
+  * `IsDouble()` whether the number is a `double`
+
+Note that, an integer value may be obtained in various way without conversion. For example, A value `x` containing `123` will make `x.IsInt() == x.IsUint() == x.Int64() == x.Uint64() == ture`. But a value `y` containing `-3000000000` will only makes x.int64() == true.
+
+When obtaining the numeric value by `GetXXX()`, only `GetDouble()` may  convert the internal integer representation to a `double`. `int` and `uint` can be safely convert to `double`, but `int64_t` and `uint64_t` may lose some precision (since mantissa of double is only 52-bits).
+
+### Querying String ###
+In addition to providing the obvious `GetString()` function, **rapidjson** also provides a `GetStringLength()` function. Here explains why.
+
+According to RFC 4627, JSON string can contain unicode character `U+0000`, which must be escaped as `"\u0000"`. The problem is that, C/C++ often uses null-terminated string, which treats `\0' as the terminal symbol.
+
+To conform RFC 4627, **rapidjson** supports string containing `U+0000`. If user want to handle this, he/she should use `GetStringLength()` API to obtain the correct length of string.
+
+For example, after parsing a the following JSON string to `Document d`.
+
+```
+{ "s" :  "a\u0000b" }
+```
+
+The correct length of the value "a\u0000b" is 3. But `strlen()` will just returns 1.
+
+`GetStringLength()` can also improve performance, as user may often need to call `strlen()` for allocating buffer.
+
+Besides, `std::string` also support a constructor:
+```
+basic_string( const CharT* s,
+              size_type count, 
+              const Allocator& alloc = Allocator() );
+```
+which accepts the length of string as parameter. This constructor supports null character in the string, and should also provide better performance.
+
+## 3.2. Creating and Modifying Values ##
+
+There are several ways to create values. After a DOM tree is created and/or modified, it can be saved as JSON again using Writer.
+
+### Changing Value Type ###
+
+When creating a Value or Document by default constructor, its type is Null. To change its type, call `SetXXX()` or assignment operator, for example:
+
+```
+Document d;
+d.SetObject();
+
+Value v;
+v.SetInt(10);
+v = 10; // Shortcut, same as above
+```
+
+### Overloaded Constructors ###
+
+There are also overloaded constructors for several types:
+
+```
+Value b(true);    // calls Value(bool)
+Value i(-123);    // calls Value(int)
+Value u(123u);    // calls Value(unsigned)
+Value d(1.5);     // calls Value(double)
+```
+
+To create empty object or array, you may use `SetObject()`/`SetArray()` after default constructor, or using the `Value(Type)` in one shot:
+
+```
+Value o(kObjectType);
+Value a(kArrayType);
+```
+
+### Move Semantics ###
+A very special decision during design of **rapidjson** is that, assignment of value does not copy the source to destination. Instead, the value from source is **moved** to the destination. For example,
+
+```
+Value a(123);
+Value b(456);
+b = a;         // a becomes a Null value, b becomes number 123.
+```
+
+Why? What is the advantage of this semantics?
+
+The simple answer is performance. For fixed size JSON types (Number, True, False, Null), copying them is fast and easy. However, For variable size JSON types (String, Array, Object), copying them will incur a lot of overheads. And these overheads are often unnoticed. Especially when we need to create temporary object, copy it to another variable, and then destruct it.
+
+For example, if normal copy semantics is used
+
+```
+Value o(kObjectType);
+{
+    Value contacts(kArrayType);
+    // adding elements to contacts array.
+    // ...
+    o.AddMember("contacts", contacts);  // deep clone contacts (may be with lots of allocations)
+    // destruct contacts.
+}
+```
+
+The object `o` needs to allocate a same size buffer as `contacts`, makes a deep clone of it, and then finally `contacts` is destructed. This will incur a lot of unnecessary allocations/deallocations.
+
+There are solutions to prevent actual copying these data, such as reference counting and garbage collection(GC).
+
+To make **rapidjson** simple and fast, we chose to use move semantics for assignment. It is similar to `auto_ptr<>` which transfer ownership during assignment. Move is much faster and simpler, it just destructs the original value, `memcpy()` the source to destination, and finally sets the source as Null type.
+
+So, with move semantics, the above example become:
+```
+Value o(kObjectType);
+{
+    Value contacts(kArrayType);
+    // adding elements to contacts array.
+    o.AddMember("contacts", contacts);  // just memcpy() of contacts itself to the value of new member (16 bytes)
+    // contacts became Null here. Its destruction is trivial.
+}
+```
+
+### Manipulating String ###
+**rapidjson** provide two strategies for storing string.
+  1. copy-string: allocates a buffer, and then copy the source data into it.
+  1. const-string: simply store a pointer of string.
+
+Copy-string is always safe because it owns a copy of the data. Const-string can be used for storing string literal, and in-situ parsing which we will mentioned in `Document`.
+
+To make memory allocation customizable, **rapidjson** needs user to pass an instance of allocator, whenever that operation may require allocation. This design is more flexible than STL's allocator type per class, as we can assign a allocator instance for each allocation.
+
+Therefore, when we assign a copy-string, we call this overloaded `SetString()` with allocator:
+
+```
+Document document;
+Value author;
+char buffer[10];
+int len = sprintf(buffer, "%s %s", "Milo", "Yip"); // dynamically created string.
+author.SetString(buffer, len, document.GetAllocator());
+memset(buffer, 0, sizeof(buffer));
+// author.GetString() still contains "Milo Yip" after buffer is destroyed
+```
+
+In this example, we get the allocator from a `Document` instance. This is a common idiom when using **rapidjson**. But you may use other instances of allocator.
+
+Besides, the above `SetString()` requires the length of a string. This can handle null characters within a string. There is another `SetString()` overloaded function without the length parameter. And it actually assumes the input is null-terminated and calls a `strlen()`-like function to obtain the length.
+
+Finally, for literal string or string with safe life-cycle can use const-string version of `SetString()`, which are without alloactor parameter:
+
+```
+Value s;
+s.SetString("rapidjson", 9); // faster, can contain null character
+s.SetString("rapidjson");    // slower, assumes null-terminated
+s = "rapidjson";             // shortcut, same as above
+```
+
+### Manipulating Array ###
+`Value` with array type provides similar APIs as `std::vector`.
+
+  * `Clear()`
+  * `Reserve(SizeType, Allocator&)`
+  * `Value& PushBack(Value&, Allocator&)`
+  * `template <typename T> GenericValue& PushBack(T, Allocator&)`
+  * `Value& PopBack()`
+
+Note that, `Reserve(...)` and `PushBack(...)` may allocate memory, therefore requires an allocator.
+
+Here is an example of `PushBack()`:
+
+```
+Value a(kArrayType);
+Document::AllocatorType& allocator = document.GetAllocator();
+
+for (int i = 5; i <= 10; i++)
+    a.PushBack(i, allocator);	// allocator is needed for potentially realloc.
+
+// Fluent interface
+a.PushBack("Lua", allocator).PushBack("Mio", allocator);
+```
+
+Differs from STL, `PushBack()`/`PopBack()` returns the array reference itself. This is called [fluent interface](http://en.wikipedia.org/wiki/Fluent_interface).
+
+### Manipulating Object ###
+Object is a collection of key-value pairs. Each key must be a string value. The way to manipulating object is to add/remove members:
+
+  * `Value& AddMember(Value&, Value&, Allocator& allocator)`
+  * `Value& AddMember(const Ch*, Allocator&, GenericValue& value, Allocator&)`
+  * `Value& AddMember(const Ch*, Value&, Allocator&)`
+  * `template <typename T> Value& AddMember(const Ch*, T value, Allocator&)`
+  * `bool RemoveMember(const Ch*)`
+
+There are 4 overloaded version of `AddMember()`. They are 4 combinations for supplying the name string (copy- or const-), whether to supply a different allocator for name string, and whether use generic type for value.
+
+Here is an example.
+
+```
+Value contact(kObejct);
+contact.AddMember("name", "Milo", document.GetAllocator());
+contact.AddMember("married", true, document.GetAllocator());
+```
+
+# 4. Document #
+
+# 5. Reader #
+
+# 6. Writer #
+
+# 7. Encoding #
+
+# 8. Customization #
+
+## 8.1 Macros ##
+
+## 8.2 Memory Allocator ##
